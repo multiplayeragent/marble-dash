@@ -1,0 +1,846 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Marble Dash</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #9ad8ff; }
+  body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; touch-action: none; }
+  .hud { position: fixed; pointer-events: none; text-shadow: 0 2px 4px #0009; font-weight: 800; }
+  #pos { top: max(12px, env(safe-area-inset-top)); left: max(16px, env(safe-area-inset-left)); font-size: 40px; line-height: 1; }
+  #pos small { font-size: 18px; opacity: .9; }
+  #cp { top: calc(max(12px, env(safe-area-inset-top)) + 46px); left: max(16px, env(safe-area-inset-left)); font-size: 16px; }
+  #time { top: max(12px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); font-size: 30px; font-variant-numeric: tabular-nums; }
+  #net { bottom: max(10px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 600; opacity: .9; white-space: nowrap; }
+  #hint { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 26px); left: 0; right: 0; text-align: center; font-size: 16px; padding: 0 16px; }
+  body.touch #net { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 140px); }
+  body.touch #hint { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 160px); }
+  #count { inset: 0; display: grid; place-items: center; font-size: min(26vw, 180px); color: #ffd23f; -webkit-text-stroke: 4px #6a2c00; }
+  #msg { top: 26%; left: 0; right: 0; text-align: center; font-size: 32px; color: #ffe14d; -webkit-text-stroke: 1.5px #6a3d00; transition: opacity .3s, transform .3s; opacity: 0; transform: scale(.85); }
+  #msg.on { opacity: 1; transform: scale(1); }
+  #over { position: fixed; inset: 0; display: grid; place-items: center; background: #0a1a3066; }
+  #over[hidden], .touch[hidden] { display: none; }
+  .card { width: min(380px, 90vw); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 16px; background: #1b2140f2; border: 1px solid #ffffff2a; box-sizing: border-box; }
+  .card h2 { margin: 0 0 8px; font-size: 22px; }
+  .card h3 { margin: 14px 0 4px; font-size: 14px; color: #ffe14d; }
+  .card ol { margin: 0; padding-left: 24px; font-size: 14px; }
+  .card li span { float: right; font-variant-numeric: tabular-nums; }
+  .card li i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+  .card li.me { color: #ffe14d; font-weight: 700; }
+  .card li.note { list-style: none; margin-left: -24px; opacity: .8; }
+  .card p { margin: 12px 0 0; font-size: 13px; opacity: .8; }
+  button.go { width: 100%; min-height: 48px; margin-top: 14px; border: 0; border-radius: 12px; background: #3ddc84; color: #06240f; font: 800 17px system-ui, sans-serif; cursor: pointer; }
+  #stick { position: fixed; left: max(24px, env(safe-area-inset-left)); bottom: max(24px, env(safe-area-inset-bottom)); width: 128px; height: 128px; border-radius: 50%; background: #ffffff22; border: 2px solid #ffffff88; touch-action: none; }
+  #knob { position: absolute; left: 39px; top: 39px; width: 50px; height: 50px; border-radius: 50%; background: #ffffffaa; }
+  #jumpBtn { position: fixed; right: max(24px, env(safe-area-inset-right)); bottom: max(30px, env(safe-area-inset-bottom)); width: 96px; height: 96px; border-radius: 50%; border: 2px solid #ffffffaa; background: #ffffff33; color: #fff; font: 800 16px system-ui, sans-serif; touch-action: none; }
+  #jumpBtn.on { background: #ffffff77; }
+</style>
+<script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
+<script type="importmap">{ "imports": { "three": "./libs/three.module.min.js" } }</script>
+</head>
+<body>
+<div class="hud" id="pos"></div>
+<div class="hud" id="cp"></div>
+<div class="hud" id="time"></div>
+<div class="hud" id="hint"></div>
+<div class="hud" id="net">Connecting…</div>
+<div class="hud" id="count"></div>
+<div class="hud" id="msg"></div>
+<div class="touch" id="stick" hidden><div id="knob"></div></div>
+<button class="touch" id="jumpBtn" hidden>JUMP</button>
+<div id="over" hidden><div class="card">
+  <h2>Results</h2><ol id="results"></ol>
+  <h3>Fastest runs to the goal</h3><ol id="board"><li class="note">Loading…</li></ol>
+  <button class="go" id="again">Roll again</button>
+  <p id="next"></p>
+</div></div>
+<script type="module">
+/* ═══ MARBLE DASH · a Multiplayer Agent starter ═══════════════════════════════════════
+ * Everyone rolls a marble down the same sky course at once; first to the goal wins.
+ * Party, 2–8 players; bots fill empty seats.
+ *
+ * WHERE THINGS ARE (search for the "── " headers):
+ *   CONFIG ........ marble physics, timers, bots, and the COURSE: a list of pieces, in order
+ *   CONNECTION .... MP_CONNECT, joining, the offline room, who is host, the shared clock
+ *   COURSE ........ turns CONFIG.course into boxes (floors, ramps, rails, movers, the sweeper)
+ *                   and a centre line (for progress and the bots)
+ *   PHYSICS ....... one function rolls any marble (you or a bot): push, jump, bounce, ride
+ *   WORLD ......... sky, clouds, the course meshes, flags, the goal, the marbles, effects
+ *   RACE (HOST) ... the round's phases (start, race, done) and the bots. Only the host writes these.
+ *   ME ............ rolling, checkpoints, falling, finishing. Each player writes only its own.
+ *   HUD & RESULTS . place, checkpoint, timer, countdown, results, leaderboard
+ *   INPUT ......... keyboard, and a touch stick plus a Jump button
+ *
+ * HOW THE MULTIPLAYER WORKS (a relay room: no server code):
+ *   - Each player rolls its OWN marble and writes it to its entity as `m` (one packed JSON
+ *     field: round id, position, velocity, checkpoint, progress, finish time) about 15 times
+ *     a second, plus `hb` (heartbeat) once a second and `n`/`c` (name, color) once.
+ *   - Marbles bump each other: each player pushes its own marble out of the others it
+ *     touches, so a bump looks the same from both sides without anyone writing anyone else.
+ *   - Movers and the sweeper move on a SHARED CLOCK: their position is a function of time,
+ *     so nobody streams them. The host writes `clk` (its clock) every 2 seconds and everyone
+ *     else keeps the offset.
+ *   - The HOST is the lowest sessionId among live players (heartbeat seen in the last 3s),
+ *     worked out every frame. Only the host writes `race` (id, version `v`, phase, start
+ *     and end times, results), `bots` and `clk`. A new host adopts them and carries on.
+ *   - A new round starts only when the host bumps race.id; every client then puts its marble
+ *     back on the start pad. Someone who joins mid-round starts from the start pad.
+ *   - Intent: "again" {} from the results card asks the host to start the next round now.
+ *   - ?attract plays offline with bots only (the preview video is recorded from it).
+ *   - Leaderboard "fastest-run": each player's best time to the goal (stored as
+ *     600000 - ms, so higher is better), shown on the results card.
+ */
+import * as THREE from "three";
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────────────
+const CONFIG = {
+  seats: 6,               // bots fill the round up to this many marbles
+  radius: 0.6,            // marble size
+  gravity: 25,
+  roll: 22,               // how hard you push your marble on the ground, units/s²
+  airRoll: 7,             // ...and in the air
+  rollDrag: 0.45,         // rolling slowdown, per second
+  maxSpeed: 24,           // top speed across the ground
+  jump: 9,                // jump speed
+  bumper: 15,             // how hard bumpers kick
+  fallBelow: 12,          // drop this far below the course and you go back to your checkpoint
+  countdown: 4000,        // ms on the start pad before GO
+  afterFirst: 25000,      // ms the round stays open after the first marble reaches the goal
+  resultsFor: 12000,      // ms the results show before the next round
+  timeLimit: 180000,      // ms before a round ends anyway
+  botSkill: [0.75, 1],    // how fast and careful bots are
+  // How fast bots dare to roll on each kind of piece.
+  botSpeed: { start: 12, straight: 15, slope: 22, kicker: 22, gap: 22, beam: 5.5, checkpoint: 11, bumpers: 9, turn: 8, movers: 5, sweeper: 8, stairs: 8, hops: 11, goal: 8 },
+  board: "fastest-run",
+  // The course, start to goal. Pieces: start, straight, slope (drop = how far down), kicker
+  // (a ramp up that throws you over the next gap), gap, beam, checkpoint, bumpers, turn
+  // (dir 1 = right, -1 = left), movers, sweeper, stairs, hops (gaps to jump), goal.
+  course: [
+    { type: "start" },
+    { type: "straight", len: 12, w: 8, rails: true },
+    { type: "slope", len: 26, drop: 8, w: 8, rails: true },
+    { type: "straight", len: 5, w: 8, rails: true },
+    { type: "kicker" }, { type: "gap", len: 8, drop: 3 },
+    { type: "straight", len: 12, w: 10 },
+    { type: "checkpoint" },
+    { type: "bumpers", len: 24, w: 12 },
+    { type: "turn", dir: -1, w: 10 },
+    { type: "beam", len: 16 },
+    { type: "checkpoint" },
+    { type: "movers", n: 3 },
+    { type: "straight", len: 5, w: 8 },
+    { type: "sweeper", w: 16 },
+    { type: "turn", dir: 1, w: 10 },
+    { type: "checkpoint" },
+    { type: "stairs", n: 4 },
+    { type: "hops", n: 3 },
+    { type: "slope", len: 30, drop: 10, w: 9, rails: true },
+    { type: "kicker" }, { type: "gap", len: 10, drop: 4 },
+    { type: "goal" },
+  ],
+};
+const BOT_NAMES = ["Rolly", "Pebble", "Bouncy", "Glassy", "Swirl", "Zoomie", "Clink"];
+const COLORS = ["#ff4d6d", "#4dabff", "#ffd23f", "#52d273", "#c77dff", "#ff8c42", "#3de0d0", "#ff6fb5"];
+
+// ── CONNECTION ──────────────────────────────────────────────────────────────────────
+// The builder fills these in for this game. Downloaded from GitHub? Put your own pk_ key here.
+const MP_CONNECT = {
+  key: 'pk_REPLACE_ME',
+  room: 'marble-dash',
+  endpoint: 'wss://live.multiplayeragent.com',
+  apiUrl: 'https://api.multiplayeragent.com',
+};
+const ATTRACT = new URLSearchParams(location.search).has("attract");
+
+/** Same shape as the SDK client, kept in this tab: offline play and ?attract. */
+function localRoom() {
+  const id = "local", state = { entities: { players: { [id]: {} } }, shared: {} }, subs = [];
+  let queued = false;
+  const emit = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; subs.forEach((f) => f(state)); }); } };
+  const put = (o, k, v) => { if (typeof k === "object") Object.assign(o, k); else o[k] = v; emit(); };
+  return {
+    sessionId: id, state, offline: true,
+    me: { set: (k, v) => put(state.entities.players[id], k, v) },
+    setShared: (k, v) => put(state.shared, k, v),
+    onState: (f) => { subs.push(f); f(state); }, onJoin() {}, onLeave() {}, on() {}, send() {},
+    onDisconnect() {}, onReconnect() {}, leave: async () => {},
+  };
+}
+async function connect() {
+  if (ATTRACT || typeof MP === "undefined") return localRoom();
+  try {
+    const mp = await Promise.race([MP.join({ ...MP_CONNECT }), new Promise((_, no) => setTimeout(() => no(new Error("timed out")), 10000))]);
+    window.mp = mp; // the builder calls window.mp.leave() when the page closes
+    return mp;
+  } catch (e) {
+    console.warn("Playing offline:", e && e.message);
+    return localRoom();
+  }
+}
+const parse = (v, fb) => { if (typeof v !== "string") return fb; try { return JSON.parse(v); } catch { return fb; } };
+const memo = new Map();
+/** A shared JSON field, parsed once per change (read-only: never change what this returns). */
+function shared(key, fb) {
+  const raw = S.shared[key], m = memo.get(key);
+  if (m && m.raw === raw) return m.v;
+  const v = parse(raw, fb); memo.set(key, { raw, v }); return v;
+}
+let net = null, S = { entities: { players: {} }, shared: {} }, dropped = false;
+const seenHb = new Map();
+function livePlayers() {
+  const now = performance.now(), out = [];
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    const s = seenHb.get(id);
+    if (!s || s.hb !== p.hb) seenHb.set(id, { hb: p.hb, at: now });
+    if (id === net.sessionId || now - seenHb.get(id).at < 3000) out.push(id);
+  }
+  return out.sort();
+}
+const isHost = () => livePlayers()[0] === net.sessionId;
+// The shared clock: the host's Date.now() plus its own offset, learned from `clk` changes.
+const clockSync = { offset: 0, seen: undefined, samples: [], lastWrite: 0 };
+const clock = () => Date.now() + clockSync.offset;
+function syncClock(now) {
+  if (isHost()) { if (now - clockSync.lastWrite > 2000) { clockSync.lastWrite = now; net.setShared("clk", clock()); } return; }
+  const clk = Number(S.shared.clk);
+  if (!clk || clk === clockSync.seen) return;
+  if (clockSync.seen !== undefined) { // the first value we see may be old; later changes are fresh
+    clockSync.samples = [...clockSync.samples.slice(-4), clk - Date.now()];
+    clockSync.offset = Math.max(...clockSync.samples); // the least-delayed sample is the best
+  }
+  clockSync.seen = clk;
+}
+
+// ── COURSE ──────────────────────────────────────────────────────────────────────────
+// A cursor walks the course: each piece adds boxes in front of it (x = across, left is +;
+// y = up; z = forward) and moves it to the piece's end. The centre line it leaves behind
+// tells how far along anyone is, and where the bots should roll.
+const R = CONFIG.radius;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+function buildCourse() {
+  const boxes = [], line = [], bumpers = [], cps = [];
+  const cur = { p: new THREE.Vector3(), yaw: 0 };
+  const left = () => new THREE.Vector3(Math.cos(cur.yaw), 0, -Math.sin(cur.yaw)), fwd = () => new THREE.Vector3(Math.sin(cur.yaw), 0, Math.cos(cur.yaw));
+  const at = (lx, ly, lz) => cur.p.clone().addScaledVector(left(), lx).add(new THREE.Vector3(0, ly, 0)).addScaledVector(fwd(), lz);
+  /** A solid box: w across, h tall, d along, tipped forward by `pitch`. Movers slide across by `amp`; spinners turn at `spin`. */
+  function box(o) {
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(o.pitch || 0, cur.yaw, 0, "YXZ"));
+    const b = { c: o.c || at(o.lx || 0, o.ly, o.lz), q, qi: q.clone().invert(), hx: o.w / 2, hy: o.h / 2, hz: o.d / 2, kind: o.kind, bounce: o.bounce ?? 0.15, i: boxes.length };
+    b.cNow = b.c.clone(); b.cPrev = b.c.clone(); b.reach = Math.hypot(b.hx, b.hy, b.hz);
+    if (o.amp) Object.assign(b, { base: b.c.clone(), axis: left(), amp: o.amp, period: o.period, phase: o.phase });
+    if (o.spin) Object.assign(b, { spin: o.spin, q0: q.clone() });
+    boxes.push(b); return b;
+  }
+  const mark = (lz, o = {}) => line.push({ p: at(0, 0, lz), left: left(), ...o });
+  /** A floor from here: len long, dropping `drop` (negative rises), w wide, with optional rails. */
+  function slab(len, drop, w, o = {}) {
+    const th = Math.atan2(drop, len), D = Math.hypot(len, drop), cs = Math.cos(th), sn = Math.sin(th);
+    mark(0, { type: o.piece, w });
+    const floor = box({ ly: -drop / 2 - 0.5 * cs, lz: len / 2 - 0.5 * sn, w, h: 1, d: D, pitch: th, kind: o.kind || "floor" });
+    if (o.rails) for (const s of [-1, 1]) box({ lx: s * (w / 2 - 0.2), ly: -drop / 2 + 0.4 * cs, lz: len / 2 + 0.4 * sn, w: 0.4, h: 0.8, d: D, pitch: th, kind: "rail", bounce: 0.3 });
+    cur.p.addScaledVector(fwd(), len); cur.p.y -= drop;
+    return floor;
+  }
+  const PIECES = {
+    start: () => { const b = slab(12, 0, 14, { kind: "start", piece: "start" }); b.cp = 0; cps.push({ box: b, li: 0 }); },
+    straight: (o) => slab(o.len, 0, o.w, { rails: o.rails, piece: "straight" }),
+    slope: (o) => slab(o.len, o.drop, o.w, { rails: o.rails, kind: "slope", piece: "slope" }),
+    kicker: () => slab(5, -1.8, 8, { kind: "kicker", piece: "kicker" }),
+    gap: (o) => { mark(0, { type: "gap", w: 8 }); cur.p.addScaledVector(fwd(), o.len); cur.p.y -= o.drop || 0; },
+    beam: (o) => slab(o.len, 0, 2.4, { kind: "beam", piece: "beam" }),
+    checkpoint: () => { const li = line.length, b = slab(8, 0, 10, { kind: "checkpoint", piece: "checkpoint" }); b.cp = cps.length; cps.push({ box: b, li }); },
+    goal: () => { slab(14, 0, 14, { kind: "goal", piece: "goal" }).goal = true; mark(0, { type: "goal", w: 14 }); },
+    bumpers: (o) => {
+      const spots = [[-0.22, 0.25], [0.22, 0.25], [0, 0.5], [-0.3, 0.74], [0.3, 0.74], [0, 0.92]].map(([x, f]) => at(x * o.w, 0, f * o.len));
+      slab(o.len, 0, o.w, { rails: true, piece: "bumpers" });
+      for (const c of spots) bumpers.push({ c, r: 0.9, h: 1.2, flash: 0 });
+    },
+    turn: (o) => { // a square corner: in at the near side, out of the side `dir` points to
+      const w = o.w, d = o.dir;
+      mark(0, { type: "turn", w });
+      box({ ly: -0.5, lz: w / 2, w, h: 1, d: w, kind: "floor" });
+      box({ ly: 0.4, lz: w - 0.2, w, h: 0.8, d: 0.4, kind: "rail", bounce: 0.3 });
+      box({ lx: d * (w / 2 - 0.2), ly: 0.4, lz: w / 2, w: 0.4, h: 0.8, d: w, kind: "rail", bounce: 0.3 });
+      mark(w / 2, { type: "turn", w });
+      cur.p.copy(at(-d * w / 2, 0, w / 2)); cur.yaw -= d * Math.PI / 2;
+    },
+    movers: (o) => { // platforms sliding side to side, end to end: cross when they line up
+      mark(0, { type: "movers", w: 4 });
+      for (let j = 0; j < o.n; j++) mark(2.5 + j * 5, { type: "movers", w: 4, mover: box({ ly: -0.5, lz: 2.5 + j * 5, w: 4, h: 1, d: 5, kind: "mover", amp: 3.2, period: 3.4, phase: j * 2.1 }) });
+      cur.p.addScaledVector(fwd(), o.n * 5);
+    },
+    sweeper: (o) => { // a square with a spinning bar that knocks marbles off
+      const mid = at(0, 0.65, o.w / 2);
+      slab(o.w, 0, o.w, { kind: "sweep", piece: "sweeper" });
+      box({ c: mid, w: o.w * 0.86, h: 0.8, d: 0.7, kind: "bar", spin: 1.6, bounce: 0.6 });
+    },
+    stairs: (o) => { for (let j = 0; j < o.n; j++) { slab(3.2, 0, 8, { kind: "stairs", piece: "stairs" }); cur.p.y -= 1; } },
+    hops: (o) => { for (let j = 0; j < o.n; j++) { slab(5, 0, 6, { piece: "hops" }); mark(-0.9, { type: "hops", w: 6, jump: true }); cur.p.addScaledVector(fwd(), 3.2); } },
+  };
+  for (const piece of CONFIG.course) PIECES[piece.type](piece);
+  let s = 0;
+  line.forEach((pt, i) => { if (i) s += pt.p.distanceTo(line[i - 1].p); pt.s = s; });
+  return { boxes, line, bumpers, cps, length: s };
+}
+const course = buildCourse();
+/** Move the movers and the sweeper to clock time t (seconds). */
+function updateCourse(t) {
+  for (const b of course.boxes) {
+    if (b.amp) { b.cPrev.copy(b.cNow); b.cNow.copy(b.base).addScaledVector(b.axis, moverOffset(b, t)); }
+    if (b.spin) { b.q.setFromAxisAngle(UP, b.spin * t).multiply(b.q0); b.qi.copy(b.q).invert(); }
+  }
+}
+const moverOffset = (b, t) => b.amp * Math.sin((t * Math.PI * 2) / b.period + b.phase);
+const UP = new THREE.Vector3(0, 1, 0);
+/** The centre-line segment nearest p, searching near `hint`: { i, f (0..1 along it), s (distance along the course) }. */
+function nearestSeg(p, hint) {
+  const L = course.line; let best = { i: 0, f: 0, d: Infinity };
+  for (let i = Math.max(0, hint - 3); i < Math.min(L.length - 1, hint + 7); i++) {
+    const a = L[i].p, b = L[i + 1].p, abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z, l2 = abx * abx + aby * aby + abz * abz || 1;
+    const f = clamp(((p.x - a.x) * abx + (p.y - a.y) * aby + (p.z - a.z) * abz) / l2, 0, 1);
+    const d = (a.x + abx * f - p.x) ** 2 + ((a.y + aby * f - p.y) * 0.5) ** 2 + (a.z + abz * f - p.z) ** 2;
+    if (d < best.d) best = { i, f, d };
+  }
+  best.s = course.line[best.i].s + best.f * (course.line[best.i + 1].s - course.line[best.i].s);
+  return best;
+}
+
+// ── PHYSICS ─────────────────────────────────────────────────────────────────────────
+// A marble: { p (position), v (velocity), ground (the box it rolls on), coyote, jumpBuf }.
+const newMarble = (p) => ({ p: p.clone(), v: new THREE.Vector3(), ground: null, coyote: 0, jumpBuf: 0, li: 0, s: 0, f: 0, lost: false });
+/** Has marble m fallen off (dropped well below the course, or landed off it)? */
+const fallen = (m) => m.lost || m.p.y < course.line[m.li].p.y - CONFIG.fallBelow;
+const _l = new THREE.Vector3(), _c = new THREE.Vector3(), _n = new THREE.Vector3(), _bv = new THREE.Vector3(), _d = new THREE.Vector3();
+/** Push marble m out of box b and bounce it. Leaves the contact normal in _n. */
+function collideBox(m, b) {
+  _l.copy(m.p).sub(b.cNow).applyQuaternion(b.qi);
+  _c.set(clamp(_l.x, -b.hx, b.hx), clamp(_l.y, -b.hy, b.hy), clamp(_l.z, -b.hz, b.hz));
+  _n.copy(_l).sub(_c);
+  let d = _n.length(), pen;
+  if (d >= R) return false;
+  if (d > 1e-5) { _n.divideScalar(d); pen = R - d; }
+  else { // the centre got inside: out through the nearest face
+    const ex = b.hx - Math.abs(_l.x), ey = b.hy - Math.abs(_l.y), ez = b.hz - Math.abs(_l.z);
+    if (ey <= ex && ey <= ez) { _n.set(0, Math.sign(_l.y) || 1, 0); pen = R + ey; } else if (ex <= ez) { _n.set(Math.sign(_l.x) || 1, 0, 0); pen = R + ex; } else { _n.set(0, 0, Math.sign(_l.z) || 1); pen = R + ez; }
+  }
+  _n.applyQuaternion(b.q);
+  m.p.addScaledVector(_n, pen);
+  _bv.set(0, 0, 0); // the box's own speed where we touch it (the sweeper's bar)
+  if (b.spin) { _d.copy(m.p).sub(b.cNow); _bv.set(b.spin * _d.z, 0, -b.spin * _d.x); }
+  const vn = _d.copy(m.v).sub(_bv).dot(_n);
+  if (vn < 0) m.v.addScaledVector(_n, -vn * (1 + (vn < -2 ? b.bounce : 0)));
+  return true;
+}
+function collideBumper(m, bp) {
+  if (m.p.y > bp.c.y + bp.h + R || m.p.y < bp.c.y - R) return false;
+  const dx = m.p.x - bp.c.x, dz = m.p.z - bp.c.z, d = Math.hypot(dx, dz);
+  if (d >= bp.r + R || d < 1e-5) return false;
+  const nx = dx / d, nz = dz / d, vn = m.v.x * nx + m.v.z * nz, out = Math.max(-vn, CONFIG.bumper * 0.7);
+  m.p.x = bp.c.x + nx * (bp.r + R); m.p.z = bp.c.z + nz * (bp.r + R);
+  m.v.x += nx * (out - vn); m.v.z += nz * (out - vn);
+  return true;
+}
+/** Roll any marble for dt with input { x, z (a world direction, length ≤ 1), jump }. Returns "jump", "bump", "knock", "land" or null. */
+function stepMarble(m, inp, dt) {
+  let ev = null;
+  if (m.ground && m.ground.amp) m.p.add(_d.subVectors(m.ground.cNow, m.ground.cPrev)); // ride the mover
+  const acc = m.ground ? CONFIG.roll : CONFIG.airRoll, wasGround = !!m.ground;
+  m.v.x += inp.x * acc * dt; m.v.z += inp.z * acc * dt; m.v.y -= CONFIG.gravity * dt;
+  if (m.ground) { const k = Math.max(0, 1 - CONFIG.rollDrag * dt); m.v.x *= k; m.v.z *= k; }
+  const hs = Math.hypot(m.v.x, m.v.z); if (hs > CONFIG.maxSpeed) { m.v.x *= CONFIG.maxSpeed / hs; m.v.z *= CONFIG.maxSpeed / hs; }
+  m.jumpBuf = inp.jump ? 0.15 : Math.max(0, m.jumpBuf - dt);
+  if (m.jumpBuf > 0 && m.coyote > 0) { m.v.y = Math.max(0, m.v.y) + CONFIG.jump; m.jumpBuf = 0; m.coyote = 0; ev = "jump"; }
+  const n = Math.min(8, Math.max(1, Math.ceil((m.v.length() * dt) / (R * 0.5)))), h = dt / n;
+  m.ground = null;
+  for (let k = 0; k < n; k++) {
+    m.p.addScaledVector(m.v, h);
+    for (const b of course.boxes) {
+      if (m.p.distanceToSquared(b.cNow) > (b.reach + R) ** 2 || !collideBox(m, b)) continue;
+      if (_n.y > 0.55) m.ground = b; else if (b.kind === "bar") ev = "knock";
+    }
+    for (const bp of course.bumpers) if (collideBumper(m, bp)) { ev = "bump"; bp.flash = 1; }
+  }
+  m.coyote = m.ground ? 0.12 : Math.max(0, m.coyote - dt);
+  if (m.ground && !wasGround && !ev) ev = "land";
+  const near = nearestSeg(m.p, m.li);
+  if (near.d < 100) { m.li = near.i; m.s = near.s; m.f = near.f; }
+  m.lost = !!m.ground && near.d > 100; // landed somewhere off the course (a shortcut): counts as a fall
+  return ev;
+}
+/** Steering for a bot (or the ?attract autopilot): roll toward a point a little way along the centre line. */
+function botInput(b, t) {
+  const L = course.line, m = b.m, i = m.li, seg = L[i], next = L[i + 1] || seg;
+  const sp = Math.hypot(m.v.x, m.v.z);
+  // the spot to aim for: `look` units further along the line, plus this bot's lane
+  let look = 3 + sp * 0.3, j = i;
+  const tgt = new THREE.Vector3().copy(seg.p).lerp(next.p, m.f);
+  while (look > 0 && j < L.length - 1) { const d = tgt.distanceTo(L[j + 1].p); if (d >= look) { tgt.lerp(L[j + 1].p, look / d); look = 0; } else { look -= d; tgt.copy(L[j + 1].p); j++; } }
+  const lane = seg.mover || next.mover || seg.type === "beam" ? 0 : b.lane * Math.max(0, (seg.w || 6) / 2 - 1.5);
+  tgt.addScaledVector(seg.left, lane + (m.ground && m.ground.amp ? moverOffset(m.ground, t) : 0));
+  let want = (CONFIG.botSpeed[seg.type] ?? 12) * b.skill;
+  if (next && m.p.distanceTo(next.p) < 7) want = Math.min(want, (CONFIG.botSpeed[next.type] ?? 12) * b.skill + 2); // slow down for what's next
+  const mover = [L[i + 1], L[i + 2]].find((x) => x && x.mover && x.mover !== m.ground);
+  if (mover && m.p.distanceTo(mover.p) < 5.6) { // wait for the next platform to line up with this one
+    const here = m.ground && m.ground.amp ? moverOffset(m.ground, t) : 0;
+    if (Math.abs(moverOffset(mover.mover, t + 0.4) - here) > 1.5) want = 0;
+  }
+  const dx = tgt.x - m.p.x, dz = tgt.z - m.p.z, d = Math.hypot(dx, dz) || 1;
+  let ix = ((dx / d) * want - m.v.x) * 0.35, iz = ((dz / d) * want - m.v.z) * 0.35;
+  const l = Math.hypot(ix, iz); if (l > 1) { ix /= l; iz /= l; }
+  const hop = [L[i], L[i + 1]].find((x) => x && x.jump);
+  return { x: ix, z: iz, jump: !!hop && m.coyote > 0 && Math.hypot(hop.p.x - m.p.x, hop.p.z - m.p.z) < 1 + sp * 0.06 };
+}
+/** Where checkpoint `cp` puts marble number `n` back. */
+function spawnAt(cp, n) {
+  const c = course.cps[Math.min(cp, course.cps.length - 1)], b = c.box, pt = course.line[c.li], fwd = new THREE.Vector3(-pt.left.z, 0, pt.left.x);
+  return b.cNow.clone().add(new THREE.Vector3(0, b.hy + R + 0.05, 0)).addScaledVector(pt.left, ((n % 4) - 1.5) * 1.7).addScaledVector(fwd, 2.5 - Math.floor(n / 4) * 2); // rows of 4, inside the next piece's rails
+}
+
+// ── WORLD ───────────────────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+const cv = renderer.domElement;
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog("#bfe6ff", 70, 240);
+const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 1200);
+function fit() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.fov = camera.aspect < 1 ? 78 : 62; camera.updateProjectionMatrix(); }
+addEventListener("resize", fit); addEventListener("orientationchange", fit); fit();
+scene.add(new THREE.HemisphereLight("#ffffff", "#8fb3d9", 1.3));
+const sun = new THREE.DirectionalLight("#fff3d6", 1.6);
+sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -26, right: 26, top: 26, bottom: -26, near: 1, far: 120 });
+scene.add(sun, sun.target);
+function canvasTex(w, h, paint, repeat) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h; paint(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+function mulberry32(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const seeded = mulberry32(3);
+// Sky: a dome, deep blue overhead to pale at the horizon; clouds all around and below.
+const skyGeo = new THREE.SphereGeometry(900, 32, 16), skyCol = [], skyTop = new THREE.Color("#3d8ef0"), skyLow = new THREE.Color("#d7f0ff");
+for (let i = 0; i < skyGeo.attributes.position.count; i++) { const c = skyLow.clone().lerp(skyTop, clamp(skyGeo.attributes.position.getY(i) / 500, 0, 1)); skyCol.push(c.r, c.g, c.b); }
+skyGeo.setAttribute("color", new THREE.Float32BufferAttribute(skyCol, 3));
+const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
+scene.add(sky);
+const mid = course.boxes.reduce((a, b) => a.add(b.c), new THREE.Vector3()).divideScalar(course.boxes.length);
+const CLOUDS = 70, clouds = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshLambertMaterial({ color: "#ffffff", emissive: "#ffffff", emissiveIntensity: 0.45, flatShading: true }), CLOUDS * 3);
+const mtx = new THREE.Matrix4(), q0 = new THREE.Quaternion();
+for (let i = 0, tries = 0; i < CLOUDS && tries < 2000; tries++) { // kept clear of the course, so they never block the view
+  const a = seeded() * Math.PI * 2, r = 40 + seeded() * 160, y = mid.y - 50 + seeded() * 60, s = 4 + seeded() * 6;
+  const cx = mid.x + Math.cos(a) * r, cz = mid.z + Math.sin(a) * r;
+  if (course.line.some((pt) => Math.hypot(pt.p.x - cx, pt.p.z - cz) < 30 + s * 2 && y > pt.p.y - 28)) continue;
+  for (let k = 0; k < 3; k++) { mtx.compose(new THREE.Vector3(cx + (k - 1) * s * 1.2, y + (k === 1 ? s * 0.35 : 0), cz), q0, new THREE.Vector3(s * (k === 1 ? 1.4 : 1), s * 0.7, s)); clouds.setMatrixAt(i * 3 + k, mtx); }
+  i++; clouds.count = i * 3;
+}
+scene.add(clouds);
+// The course meshes: checkered tiles tinted by kind.
+const tileTex = canvasTex(64, 64, (c) => { c.fillStyle = "#ffffff"; c.fillRect(0, 0, 64, 64); c.fillStyle = "#dfe3ee"; c.fillRect(0, 0, 32, 32); c.fillRect(32, 32, 32, 32); }, true);
+const arrowTex = canvasTex(64, 64, (c) => { c.fillStyle = "#ffd23f"; c.fillRect(0, 0, 64, 64); c.fillStyle = "#ff8c1a"; c.beginPath(); c.moveTo(8, 14); c.lineTo(32, 50); c.lineTo(56, 14); c.lineTo(44, 14); c.lineTo(32, 32); c.lineTo(20, 14); c.fill(); }, true); // drawn pointing down: that's forward on a box's top
+const KIND_COLOR = { floor: "#8ec5ff", start: "#ffffff", slope: "#ff9ccf", beam: "#ffa94d", checkpoint: "#5be38f", goal: "#ffd700", rail: "#ffffff", mover: "#5ee6e6", bar: "#ff4d6d", stairs: "#b79cff", sweep: "#c9bbff" };
+const MATS = {};
+const matFor = (kind) => MATS[kind] || (MATS[kind] = kind === "kicker" ? new THREE.MeshStandardMaterial({ map: arrowTex, roughness: 0.5 }) : new THREE.MeshStandardMaterial({ color: KIND_COLOR[kind] || "#cccccc", map: kind === "bar" || kind === "rail" ? null : tileTex, roughness: 0.55, emissive: kind === "bar" ? "#661020" : "#000000" }));
+/** A box whose tiles stay 2 units big however large the box is. */
+function tiledBox(w, h, d) {
+  const g = new THREE.BoxGeometry(w, h, d), uv = g.attributes.uv, dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let f = 0; f < 6; f++) for (let k = 0; k < 4; k++) { const i = f * 4 + k; uv.setXY(i, (uv.getX(i) * dims[f][0]) / 2, (uv.getY(i) * dims[f][1]) / 2); }
+  return g;
+}
+const boxMeshes = course.boxes.map((b) => {
+  const m = new THREE.Mesh(tiledBox(b.hx * 2, b.hy * 2, b.hz * 2), matFor(b.kind));
+  m.position.copy(b.c); m.quaternion.copy(b.q); m.castShadow = b.kind !== "floor"; m.receiveShadow = true; scene.add(m); return m;
+});
+const bumperTex = canvasTex(64, 32, (c) => { c.fillStyle = "#ff4d6d"; c.fillRect(0, 0, 64, 32); c.fillStyle = "#fff"; c.fillRect(0, 11, 64, 10); });
+const bumperMeshes = course.bumpers.map((bp) => {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(bp.r, bp.r, bp.h, 24).translate(0, bp.h / 2, 0), new THREE.MeshStandardMaterial({ map: bumperTex, emissive: "#ffcf3f", emissiveIntensity: 0 }));
+  m.position.copy(bp.c); m.castShadow = true; scene.add(m); return m;
+});
+// Checkpoint flags and the goal arch with its trophy.
+const flagMeshes = [];
+for (const c of course.cps.slice(1)) {
+  const b = c.box, pt = course.line[c.li], base = b.cNow.clone().addScaledVector(pt.left, b.hx - 0.4).add(new THREE.Vector3(0, b.hy, 0));
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.4, 6), new THREE.MeshStandardMaterial({ color: "#fff" })); pole.position.copy(base).add(new THREE.Vector3(0, 1.7, 0));
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.9).translate(0.7, 0, 0), new THREE.MeshStandardMaterial({ color: "#3ddc84", side: THREE.DoubleSide, emissive: "#0a5", emissiveIntensity: 0.3 }));
+  flag.position.copy(base).add(new THREE.Vector3(0, 2.9, 0)); scene.add(pole, flag); flagMeshes.push(flag);
+}
+const goalBox = course.boxes.find((b) => b.goal), goalPt = course.line[course.line.length - 2];
+{
+  const top = goalBox.cNow.clone().add(new THREE.Vector3(0, goalBox.hy, 0)), postMat = new THREE.MeshStandardMaterial({ color: "#ff4d6d" });
+  for (const s of [-1, 1]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.8, 7, 0.8), postMat); p.position.copy(top).addScaledVector(goalPt.left, s * 6.5).add(new THREE.Vector3(0, 3.5, 0)); p.castShadow = true; scene.add(p); }
+  const tex = canvasTex(512, 96, (c) => { c.fillStyle = "#ff4d6d"; c.fillRect(0, 0, 512, 96); c.fillStyle = "#fff"; c.font = "900 64px system-ui"; c.textAlign = "center"; c.fillText("GOAL", 256, 72); });
+  const banner = new THREE.Mesh(new THREE.BoxGeometry(14, 2, 0.4), new THREE.MeshBasicMaterial({ map: tex }));
+  banner.position.copy(top).add(new THREE.Vector3(0, 7, 0)); banner.lookAt(banner.position.clone().sub(new THREE.Vector3(goalPt.left.z, 0, -goalPt.left.x))); scene.add(banner);
+}
+const trophy = new THREE.Mesh(new THREE.CylinderGeometry(1, 0.45, 1.6, 16), new THREE.MeshStandardMaterial({ color: "#ffd700", metalness: 0.7, roughness: 0.25, emissive: "#664400" }));
+trophy.position.copy(goalBox.cNow).add(new THREE.Vector3(0, goalBox.hy + 3.2, 0)); scene.add(trophy);
+// The marbles: a glossy swirl in the player's color, a name tag that doesn't roll with it.
+function swirlTex(color) {
+  return canvasTex(128, 64, (c) => { c.fillStyle = color; c.fillRect(0, 0, 128, 64); c.strokeStyle = "#ffffffcc"; c.lineWidth = 7; c.beginPath(); for (let x = 0; x <= 128; x += 4) c.lineTo(x, 32 + Math.sin((x / 128) * Math.PI * 4) * 14); c.stroke(); c.fillStyle = "#ffffff55"; c.fillRect(0, 4, 128, 5); });
+}
+function nameTag(name) {
+  const tex = canvasTex(256, 64, (c) => { c.font = "bold 34px system-ui"; c.textAlign = "center"; c.lineWidth = 6; c.strokeStyle = "#000a"; c.strokeText(name, 128, 44); c.fillStyle = "#fff"; c.fillText(name, 128, 44); });
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false })); s.scale.set(3.2, 0.8, 1); s.position.y = 1.5; return s;
+}
+function makeMarble(color, name) {
+  const g = new THREE.Group(), ball = new THREE.Mesh(new THREE.SphereGeometry(R, 24, 16), new THREE.MeshStandardMaterial({ map: swirlTex(color), roughness: 0.15, metalness: 0.1 }));
+  ball.castShadow = true; g.add(ball); if (name) g.add(nameTag(name));
+  g.userData.ball = ball; scene.add(g); return g;
+}
+const _ax = new THREE.Vector3(), _rq = new THREE.Quaternion();
+/** Put a marble mesh at p and spin it for the way it's rolling. */
+function placeMarble(g, p, vx, vz, dt) {
+  g.position.copy(p);
+  const sp = Math.hypot(vx, vz);
+  if (sp > 0.05) { _ax.set(vz, 0, -vx).normalize(); g.userData.ball.quaternion.premultiply(_rq.setFromAxisAngle(_ax, (sp * dt) / R)); }
+}
+// Confetti: a pool of small cubes, reused.
+const CONF = 200, confetti = new THREE.InstancedMesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), new THREE.MeshBasicMaterial({ color: "#fff" }), CONF);
+confetti.instanceMatrix.setUsage(THREE.DynamicDrawUsage); confetti.frustumCulled = false; scene.add(confetti);
+for (let i = 0; i < CONF; i++) confetti.setColorAt(i, new THREE.Color("#fff"));
+const bits = Array.from({ length: CONF }, () => ({ life: 0, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 }));
+let nextBit = 0;
+function burst(p, color, n = 30, speed = 5) {
+  const col = new THREE.Color(color), alt = new THREE.Color("#ffe14d");
+  for (let k = 0; k < n; k++) {
+    const i = nextBit, b = bits[i], a = Math.random() * Math.PI * 2, s = speed * (0.3 + Math.random() * 0.7); nextBit = (nextBit + 1) % CONF;
+    Object.assign(b, { life: 1, x: p.x, y: p.y, z: p.z, vx: Math.cos(a) * s, vy: speed * (0.5 + Math.random()), vz: Math.sin(a) * s });
+    confetti.setColorAt(i, k % 3 ? col : alt);
+  }
+  confetti.instanceColor.needsUpdate = true;
+}
+const _e = new THREE.Euler(), _sc = new THREE.Vector3(), _bp = new THREE.Vector3();
+function tickConfetti(dt) {
+  bits.forEach((b, i) => {
+    if (b.life > 0) { b.life -= dt; b.vy -= 15 * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; }
+    const s = b.life > 0 ? Math.min(1, b.life * 2) : 0;
+    mtx.compose(_bp.set(b.x, b.y, b.z), _rq.setFromEuler(_e.set(b.life * 9, b.life * 7, 0)), _sc.set(s, s, s)); confetti.setMatrixAt(i, mtx);
+  });
+  confetti.instanceMatrix.needsUpdate = true;
+}
+// Sound: tiny WebAudio blips, started by the first key or touch.
+let actx = null;
+function beep(freq, dur, type = "sine", vol = 0.12, to = 0) {
+  if (!actx) return;
+  const o = actx.createOscillator(), g = actx.createGain(); o.type = type; o.frequency.value = freq;
+  if (to) o.frequency.exponentialRampToValueAtTime(to, actx.currentTime + dur);
+  g.gain.setValueAtTime(vol, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+  o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
+}
+
+// ── RACE (HOST) ─────────────────────────────────────────────────────────────────────
+const host = { bots: new Map(), wasHost: false, lastBots: 0, raceId: 0, last: null };
+/** The round as state has it, or the host's own newer write that hasn't come back yet. `v` only goes up. */
+function race() {
+  const r = shared("race", null);
+  return host.last && isHost() && (!r || host.last.v > r.v) ? host.last : r;
+}
+function writeRace(r) { r = { ...r, v: (race()?.v ?? 0) + 1 }; host.last = r; net.setShared("race", JSON.stringify(r)); return r; }
+const newRace = (id) => writeRace({ id, phase: "grid", startAt: Date.now() + CONFIG.countdown, endsAt: 0, results: [] });
+
+/** Everyone in this round as { id, name, color, s, ft, cp }, leader first: finishers by time, then by distance along the course. */
+function racers() {
+  const out = [], r = race(), live = new Set(livePlayers());
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    if (!live.has(id)) continue;
+    if (id === net.sessionId) { out.push({ id, name: "You", color: myColor, s: me.m.s, ft: me.ft, cp: me.cp, mine: true }); continue; }
+    const k = parse(p.m, null); if (k && r && k.r === r.id) out.push({ id, name: p.n || "Player", color: p.c || "#ccc", s: k.s, ft: k.ft, cp: k.cp });
+  }
+  for (const b of botList()) out.push({ id: b.i, name: b.n, color: b.c, s: b.s, ft: b.ft, cp: b.cp, bot: true });
+  return out.sort((a, b) => (a.ft && b.ft ? a.ft - b.ft : a.ft ? -1 : b.ft ? 1 : b.s - a.s));
+}
+/** The bots as published: the host's live copy, or the last list it wrote. */
+function botList() {
+  if (isHost()) return [...host.bots.values()].map((b) => ({ i: b.id, n: b.name, c: b.color, x: b.m.p.x, y: b.m.p.y, z: b.m.p.z, vx: b.m.v.x, vy: b.m.v.y, vz: b.m.v.z, s: b.m.s, cp: b.cp, ft: b.ft, sk: b.skill, li: b.m.li }));
+  return shared("bots", []);
+}
+function spawnBots(humans) {
+  const want = Math.max(0, CONFIG.seats - humans.length);
+  const keep = [...host.bots.values()].slice(0, want);
+  host.bots.clear(); keep.forEach((b) => host.bots.set(b.id, b));
+  while (host.bots.size < want) {
+    const used = new Set([...host.bots.values()].map((b) => b.name)), name = BOT_NAMES.find((n) => !used.has(n)) || "Bot";
+    const taken = new Set([...Object.values(S.entities.players || {}).map((p) => p.c), myColor, ...[...host.bots.values()].map((b) => b.color)]);
+    const id = "b" + Math.random().toString(36).slice(2, 6), [lo, hi] = CONFIG.botSkill;
+    host.bots.set(id, { id, name, color: COLORS.find((c) => !taken.has(c)) || "#cccccc", skill: lo + Math.random() * (hi - lo) });
+  }
+  let n = humans.length;
+  for (const b of host.bots.values()) Object.assign(b, { m: newMarble(spawnAt(0, n++)), cp: 0, ft: 0, lane: (Math.random() - 0.5) * 1.2, seed: Math.random() * 9, slot: n - 1, stuckAt: 0, bestS: 0 });
+}
+function adoptBots() {
+  host.bots.clear();
+  for (const b of shared("bots", [])) {
+    const m = newMarble(new THREE.Vector3(b.x, b.y, b.z)); m.v.set(b.vx || 0, b.vy || 0, b.vz || 0); m.li = b.li || 0; m.s = b.s || 0;
+    host.bots.set(b.i, { id: b.i, name: b.n, color: b.c, skill: b.sk || 0.85, m, cp: b.cp || 0, ft: b.ft || 0, lane: (Math.random() - 0.5) * 1.2, seed: Math.random() * 9, slot: host.bots.size, stuckAt: 0, bestS: 0 });
+  }
+}
+function hostTick(dt, now, t) {
+  if (!host.wasHost) { host.wasHost = true; adoptBots(); } // adopt the bots exactly as state has them
+  let r = race();
+  const humans = livePlayers().filter((id) => !(ATTRACT && id === net.sessionId));
+  if (!r) r = newRace(1);
+  if (host.raceId !== r.id) { host.raceId = r.id; if (r.phase === "grid") spawnBots(humans); }
+  else if (r.phase === "grid" && host.bots.size !== Math.max(0, CONFIG.seats - humans.length)) spawnBots(humans); // someone joined or left before GO
+  const wall = Date.now();
+  if (r.phase === "grid" && wall >= r.startAt) r = writeRace({ ...r, phase: "race" });
+  if (r.phase === "race") {
+    const all = racers(), done = all.filter((x) => x.ft);
+    const humansDone = all.filter((x) => !x.bot && (!ATTRACT || !x.mine)).every((x) => x.ft);
+    if (done.length && !r.endsAt) r = writeRace({ ...r, endsAt: wall + CONFIG.afterFirst });
+    if ((done.length && humansDone && humans.length) || (r.endsAt && wall > r.endsAt) || wall - r.startAt > CONFIG.timeLimit || (ATTRACT && done.length >= 2)) {
+      r = writeRace({ ...r, phase: "done", endsAt: wall + CONFIG.resultsFor, results: all.map((x) => ({ id: x.id, n: x.mine ? myName : x.name, c: x.color, ft: x.ft || 0, cp: x.cp || 0 })) });
+    }
+  }
+  if (r.phase === "done" && wall > r.endsAt) r = newRace(r.id + 1);
+  for (const b of host.bots.values()) {
+    const racing = r.phase === "race" && !b.ft;
+    b.lane += (Math.sin(now / 1700 + b.seed) * 0.6 - b.lane) * dt;
+    const ev = stepMarble(b.m, racing ? botInput(b, t) : { x: -b.m.v.x * 0.2, z: -b.m.v.z * 0.2, jump: false }, dt);
+    if (ev === "bump") beepAt(b.m.p, 520, 0.06, "square", 0.05);
+    if (b.m.ground && b.m.ground.cp > b.cp) b.cp = b.m.ground.cp;
+    if (racing && b.m.ground && b.m.ground.goal) { b.ft = wall - r.startAt; burst(b.m.p, b.color, 40, 6); }
+    if (b.m.s > b.bestS + 1) { b.bestS = b.m.s; b.stuckAt = now; } else if (!b.stuckAt) b.stuckAt = now;
+    if (fallen(b.m) || (racing && now - b.stuckAt > 12000)) { b.m = newMarble(spawnAt(b.cp, b.slot)); b.m.li = course.cps[Math.min(b.cp, course.cps.length - 1)].li; b.stuckAt = now; b.bestS = 0; }
+  }
+  separateBots();
+  if (now - host.lastBots > 100) {
+    host.lastBots = now;
+    const f = (v) => +v.toFixed(2);
+    net.setShared("bots", JSON.stringify(botList().map((b) => ({ ...b, x: f(b.x), y: f(b.y), z: f(b.z), vx: f(b.vx), vy: f(b.vy), vz: f(b.vz), s: +b.s.toFixed(1), sk: f(b.sk) }))));
+  }
+}
+const beepAt = (p, ...a) => { if (p.distanceTo(me.m.p) < 25) beep(...a); };
+/** Bots' marbles bump each other (both move) and bump out of players' marbles (only the bot moves). */
+function separateBots() {
+  const bots = [...host.bots.values()].map((b) => b.m), others = [me.m, ...[...views.entries()].filter(([id]) => !host.bots.has(id)).map(([, v]) => v)];
+  bots.forEach((a, i) => {
+    for (const o of [...bots.slice(i + 1), ...others]) {
+      const d = a.p.distanceTo(o.p); if (d >= R * 2 || d < 1e-4) continue;
+      const both = bots.includes(o), push = (R * 2 - d) * (both ? 0.5 : 1);
+      _d.copy(a.p).sub(o.p).divideScalar(d); a.p.addScaledVector(_d, push);
+      const rel = _d.dot(_bv.copy(a.v).sub(o.v));
+      if (rel < 0) { a.v.addScaledVector(_d, -rel * (both ? 0.55 : 1.1)); if (both) { o.p.addScaledVector(_d, -push); o.v.addScaledVector(_d, rel * 0.55); } }
+    }
+  });
+}
+
+// ── ME ──────────────────────────────────────────────────────────────────────────────
+const myName = (() => { try { return localStorage.getItem("mpa-name") || ""; } catch { return ""; } })() ||
+  ["Speedy", "Bouncy", "Shiny", "Lucky", "Zippy", "Rolly"][Math.floor(Math.random() * 6)] + " " + ["Marble", "Pebble", "Orb", "Bead", "Comet"][Math.floor(Math.random() * 5)];
+let myColor = COLORS[0]; // picked on join: the first color nobody in the room has
+/** Two people joined at once in one color: the one with the higher sessionId picks a free one. */
+function fixColor() {
+  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId);
+  if (!others.some(([id, p]) => p.c === myColor && id < net.sessionId)) return;
+  const taken = new Set([...others.map(([, p]) => p.c), ...botList().map((b) => b.c)]), free = COLORS.find((c) => !taken.has(c));
+  if (free) { myColor = free; net.me.set("c", free); if (me.g) { scene.remove(me.g); me.g = null; } }
+}
+const me = { m: newMarble(spawnAt(0, 0)), g: null, cp: 0, ft: 0, raceId: -1, slot: 0, best: 0, lastSend: 0, submitted: -1, bumpCd: 0, lane: 0 };
+const input = { up: false, down: false, left: false, right: false, jump: false, sx: 0, sy: 0 };
+
+/** My start spot: my place among the live players, or the first one no other player is in. */
+function mySlot(r) {
+  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => parse(p.m, null)).filter((k) => k && k.r === r.id);
+  let n = Math.max(0, livePlayers().indexOf(net.sessionId));
+  while (n < 16 && others.some((k) => Math.hypot(k.x - spawnAt(0, n).x, k.z - spawnAt(0, n).z) < 1.2)) n++;
+  return n;
+}
+function resetToStart(r) {
+  me.raceId = r.id; me.slot = ATTRACT ? CONFIG.seats : r.phase === "grid" ? mySlot(r) : Math.floor(Math.random() * 8);
+  me.m = newMarble(spawnAt(0, me.slot)); me.cp = 0; me.ft = 0;
+  $("over").hidden = true;
+}
+function myTick(dt, r, t, now) {
+  if (me.raceId !== r.id) resetToStart(r);
+  const racing = r.phase === "race" && !me.ft;
+  let inp = { x: 0, z: 0, jump: false };
+  if (racing && ATTRACT) inp = botInput(me, t);
+  else if (racing) { // forward = away from the camera; right = screen right
+    const fx = Math.sin(camYaw), fz = Math.cos(camYaw), iz = (input.up ? 1 : 0) - (input.down ? 1 : 0) - input.sy, ix = (input.right ? 1 : 0) - (input.left ? 1 : 0) + input.sx;
+    let x = fx * iz - fz * ix, z = fz * iz + fx * ix; const l = Math.hypot(x, z); if (l > 1) { x /= l; z /= l; }
+    inp = { x, z, jump: input.jump };
+  } else if (r.phase === "grid") inp = { x: -me.m.v.x * 0.3, z: -me.m.v.z * 0.3, jump: false }; // hold still on the start pad
+  input.jump = false;
+  const ev = stepMarble(me.m, inp, dt);
+  if (ev === "jump") beep(520, 0.1, "triangle", 0.08, 760);
+  if (ev === "bump") { beep(620, 0.08, "square", 0.08); burst(me.m.p, "#ffcf3f", 10, 4); }
+  if (ev === "knock") { beep(160, 0.25, "sawtooth", 0.08); burst(me.m.p, "#ffffff", 12, 4); }
+  if (ev === "land" && Math.abs(me.m.v.y) > 0) beep(140, 0.06, "sine", 0.06);
+  // marbles bump: I push my own marble out of everyone else's
+  for (const v of views.values()) {
+    const d = me.m.p.distanceTo(v.p);
+    if (d < R * 2 && d > 1e-4) {
+      _d.copy(me.m.p).sub(v.p).divideScalar(d); me.m.p.addScaledVector(_d, R * 2 - d);
+      const rel = _d.dot(_bv.copy(me.m.v).sub(v.v)); if (rel < 0) me.m.v.addScaledVector(_d, -rel * 1.1);
+      if (now > me.bumpCd) { me.bumpCd = now + 250; beep(900, 0.05, "sine", 0.06); }
+    }
+  }
+  const g = me.m.ground;
+  if (g && g.cp > me.cp && racing) { me.cp = g.cp; burst(me.m.p, "#3ddc84", 40, 6); beep(660, 0.12); setTimeout(() => beep(880, 0.18), 120); toast(`Checkpoint ${me.cp}!`); }
+  if (g && g.goal && racing) finish(r);
+  if (fallen(me.m)) { // fell off: back to the checkpoint
+    me.m = newMarble(spawnAt(me.cp, me.slot)); me.m.li = course.cps[Math.min(me.cp, course.cps.length - 1)].li;
+    burst(me.m.p, myColor, 16, 3); beep(200, 0.3, "sine", 0.1, 120); toast("Oops!", 900);
+  }
+  if (now - me.lastSend > 66) {
+    me.lastSend = now; const f = (v) => +v.toFixed(2);
+    net.me.set("m", JSON.stringify({ r: me.raceId, x: f(me.m.p.x), y: f(me.m.p.y), z: f(me.m.p.z), vx: f(me.m.v.x), vy: f(me.m.v.y), vz: f(me.m.v.z), cp: me.cp, s: +me.m.s.toFixed(1), ft: me.ft }));
+  }
+}
+function finish(r) {
+  me.ft = Date.now() - r.startAt;
+  if (!me.best || me.ft < me.best) me.best = me.ft;
+  burst(me.m.p, myColor, 80, 8); beep(660, 0.15); setTimeout(() => beep(880, 0.15), 150); setTimeout(() => beep(1320, 0.35), 300);
+  const place = racers().findIndex((x) => x.mine) + 1;
+  toast(place === 1 ? "You win!" : `${ord(place)} place!`, 2600);
+}
+
+// ── HUD & RESULTS ───────────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const ord = (n) => n + (n % 10 === 1 && n % 100 !== 11 ? "st" : n % 10 === 2 && n % 100 !== 12 ? "nd" : n % 10 === 3 && n % 100 !== 13 ? "rd" : "th");
+const fmt = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}.${Math.floor((ms % 1000) / 100)}`;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+let toastTimer = 0;
+function toast(text, ms = 1500) { if (ATTRACT) return; const m = $("msg"); m.textContent = text; m.classList.add("on"); clearTimeout(toastTimer); toastTimer = setTimeout(() => m.classList.remove("on"), ms); }
+let board = null, boardFor = -1, lastCount = "", started = 0;
+function hud(r, now) {
+  const wall = Date.now();
+  const count = r.phase === "grid" && r.startAt - wall < 3000 ? String(Math.max(1, Math.ceil((r.startAt - wall) / 1000))) : r.phase === "race" && wall - r.startAt < 900 ? "GO!" : "";
+  if (count !== lastCount) { lastCount = count; if (count === "GO!") beep(880, 0.4, "square", 0.08); else if (count) beep(440, 0.15, "square", 0.08); }
+  $("count").textContent = count;
+  if (ATTRACT) { for (const id of ["pos", "cp", "time", "net", "hint"]) $(id).textContent = ""; return; }
+  const order = racers(), at = order.findIndex((x) => x.mine) + 1;
+  $("pos").innerHTML = at ? `${ord(at)} <small>/ ${order.length}</small>` : "";
+  $("cp").textContent = me.ft ? "At the goal!" : `Checkpoint ${me.cp}/${course.cps.length - 1}`;
+  $("time").textContent = r.phase === "race" || r.phase === "done" ? fmt(me.ft || Math.max(0, wall - r.startAt)) : "";
+  $("hint").textContent = r.phase === "grid" && r.startAt - wall >= 3000 ? "Next round starting…" : me.ft && r.phase === "race" ? "Waiting for the others…" :
+    now - started < 14000 ? (touchUI ? "Left thumb to roll · JUMP over gaps" : "WASD or arrows to roll · Space to jump") : "";
+  const n = livePlayers().length;
+  $("net").textContent = net.offline ? "Offline: playing with bots" : dropped ? "Reconnecting…" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the race" : ""}`;
+  $("over").hidden = r.phase !== "done";
+  if (r.phase === "done") {
+    $("results").innerHTML = r.results.map((x) => `<li class="${x.id === net.sessionId ? "me" : ""}"><i style="background:${esc(x.c || "#ccc")}"></i>${esc(x.n)}<span>${x.ft ? fmt(x.ft) : `checkpoint ${x.cp}`}</span></li>`).join("");
+    $("next").textContent = `Next round in ${Math.max(0, Math.ceil((r.endsAt - wall) / 1000))}s`;
+    if (boardFor !== r.id) { boardFor = r.id; showBoard(); }
+  }
+}
+function showBoard() {
+  const list = $("board");
+  if (!board) { list.innerHTML = "<li class=\"note\">Leaderboards need a connection.</li>"; return; }
+  const submit = me.ft && me.submitted !== me.raceId ? board.submit(Math.max(0, 600000 - me.ft)).catch(() => null) : Promise.resolve();
+  me.submitted = me.raceId;
+  submit.then(() => board.top(10)).then(({ entries }) => {
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>${fmt(600000 - e.score)}</span></li>`).join("") : "<li class=\"note\">No runs yet. Set the first.</li>";
+  }).catch(() => { list.innerHTML = "<li class=\"note\">Couldn't load the leaderboard.</li>"; });
+}
+function again() { const r = race(); if (r && r.phase === "done" && isHost()) newRace(r.id + 1); }
+$("again").onclick = () => { if (isHost()) again(); else net.send("again", {}); };
+
+// ── INPUT ───────────────────────────────────────────────────────────────────────────
+const touchUI = matchMedia("(pointer: coarse)").matches && !ATTRACT;
+$("stick").hidden = $("jumpBtn").hidden = !touchUI;
+document.body.classList.toggle("touch", touchUI);
+const KEYS = { ArrowUp: "up", w: "up", W: "up", ArrowDown: "down", s: "down", S: "down", ArrowLeft: "left", a: "left", A: "left", ArrowRight: "right", d: "right", D: "right" };
+const wakeAudio = () => { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } };
+addEventListener("keydown", (e) => { wakeAudio(); const k = KEYS[e.key]; if (k) { e.preventDefault(); input[k] = true; } if (e.key === " ") { e.preventDefault(); if (!e.repeat) input.jump = true; } });
+addEventListener("keyup", (e) => { const k = KEYS[e.key]; if (k) input[k] = false; });
+const stick = $("stick"), knob = $("knob");
+let stickId = null;
+function moveStick(e) {
+  const r = stick.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  let dx = (e.clientX - cx) / 50, dy = (e.clientY - cy) / 50; const l = Math.hypot(dx, dy); if (l > 1) { dx /= l; dy /= l; }
+  input.sx = dx; input.sy = dy; knob.style.transform = `translate(${dx * 40}px, ${dy * 40}px)`;
+}
+stick.addEventListener("pointerdown", (e) => { e.preventDefault(); wakeAudio(); stickId = e.pointerId; stick.setPointerCapture(e.pointerId); moveStick(e); });
+stick.addEventListener("pointermove", (e) => { if (e.pointerId === stickId) moveStick(e); });
+for (const ev of ["pointerup", "pointercancel"]) stick.addEventListener(ev, (e) => { if (e.pointerId !== stickId) return; stickId = null; input.sx = input.sy = 0; knob.style.transform = ""; });
+const jumpBtn = $("jumpBtn");
+jumpBtn.addEventListener("pointerdown", (e) => { e.preventDefault(); wakeAudio(); input.jump = true; jumpBtn.classList.add("on"); });
+for (const ev of ["pointerup", "pointercancel", "pointerleave"]) jumpBtn.addEventListener(ev, () => jumpBtn.classList.remove("on"));
+cv.addEventListener("pointerdown", wakeAudio);
+document.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+
+// ── MAIN LOOP ───────────────────────────────────────────────────────────────────────
+let last = performance.now(), lastHb = 0, lastHud = 0, camYaw = 0;
+const views = new Map(); // id -> drawn marble for everyone but me: { g, p, v, ... }
+function viewOf(id, color, name) {
+  let v = views.get(id);
+  if (v && v.color !== color) { scene.remove(v.g); v.g = makeMarble(color, ATTRACT ? "" : name); v.color = color; } // they changed color
+  if (!v) { v = { g: makeMarble(color, ATTRACT ? "" : name), color, p: new THREE.Vector3(), v: new THREE.Vector3(), sp: new THREE.Vector3(), sv: new THREE.Vector3(), raw: "", fresh: true, at: 0 }; views.set(id, v); }
+  return v;
+}
+/** Ease a drawn marble toward where it said it was, plus how far it has rolled since. */
+function follow(v, k, dt, now, exact) {
+  if (exact) { v.p.set(k.x, k.y, k.z); v.v.set(k.vx, k.vy, k.vz); return; }
+  const key = `${k.x},${k.y},${k.z}`;
+  if (v.raw !== key) { v.raw = key; v.sp.set(k.x, k.y, k.z); v.sv.set(k.vx || 0, k.vy || 0, k.vz || 0); v.at = now; }
+  const el = Math.min(0.25, (now - v.at) / 1000), tgt = _c.copy(v.sp).addScaledVector(v.sv, el);
+  if (v.fresh || v.p.distanceTo(tgt) > 12) { v.p.copy(tgt); v.fresh = false; }
+  v.p.lerp(tgt, 1 - Math.pow(0.0005, dt)); v.v.copy(v.sv);
+}
+const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
+function frame(now) {
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // the first frame can be stamped before `last`
+  if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixColor(); }
+  syncClock(now);
+  const t = clock() / 1000;
+  updateCourse(t);
+  if (isHost()) hostTick(dt, now, t); else host.wasHost = false;
+  const r = race();
+  if (r) myTick(dt, r, t, now);
+  // everyone else's marbles
+  const seen = new Set(), live = new Set(livePlayers()); // a closed tab can linger in state for a while: skip it
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    if (id === net.sessionId || !live.has(id)) continue;
+    const k = parse(p.m, null); if (!k || !r || k.r !== r.id) continue;
+    seen.add(id); const v = viewOf(id, p.c || "#ccc", p.n || "Player"); follow(v, k, dt, now, false); placeMarble(v.g, v.p, v.v.x, v.v.z, dt);
+  }
+  const exact = isHost();
+  for (const b of botList()) { seen.add(b.i); const v = viewOf(b.i, b.c, b.n); follow(v, b, dt, now, exact); placeMarble(v.g, v.p, v.v.x, v.v.z, dt); }
+  for (const [id, v] of views) if (!seen.has(id)) { scene.remove(v.g); views.delete(id); }
+  if (!me.g) me.g = makeMarble(myColor, "");
+  placeMarble(me.g, me.m.p, me.m.v.x, me.m.v.z, dt);
+  // the course's moving parts
+  course.boxes.forEach((b, i) => { if (b.amp || b.spin) { boxMeshes[i].position.copy(b.cNow); boxMeshes[i].quaternion.copy(b.q); } });
+  course.bumpers.forEach((bp, i) => { bp.flash = Math.max(0, bp.flash - dt * 3); bumperMeshes[i].material.emissiveIntensity = bp.flash; bumperMeshes[i].scale.set(1 + bp.flash * 0.15, 1, 1 + bp.flash * 0.15); });
+  flagMeshes.forEach((f, i) => { f.rotation.y = Math.sin(t * 3 + i) * 0.3; });
+  trophy.rotation.y = t * 1.5;
+  tickConfetti(dt);
+  // camera: behind the marble, turning to face along the course
+  const L = course.line, seg = L[me.m.li], nxt = L[Math.min(L.length - 1, me.m.li + 1)], want = Math.atan2(nxt.p.x - seg.p.x, nxt.p.z - seg.p.z);
+  camYaw += Math.atan2(Math.sin(want - camYaw), Math.cos(want - camYaw)) * Math.min(1, dt * 2.5);
+  const back = ATTRACT ? 8 : camera.aspect < 1 ? 9 : 8.5, high = ATTRACT ? 4.5 : camera.aspect < 1 ? 6.5 : 4.2; // a phone held upright looks down more
+  camPos.set(me.m.p.x - Math.sin(camYaw) * back, me.m.p.y + high, me.m.p.z - Math.cos(camYaw) * back);
+  camera.position.lerp(camPos, 1 - Math.pow(0.001, dt));
+  camLook.set(me.m.p.x + Math.sin(camYaw) * 4, me.m.p.y + 0.3, me.m.p.z + Math.cos(camYaw) * 4);
+  camera.lookAt(camLook);
+  sun.position.copy(me.m.p).add(new THREE.Vector3(18, 40, 12)); sun.target.position.copy(me.m.p);
+  sky.position.copy(camera.position);
+  renderer.render(scene, camera);
+  if (r && now - lastHud > 100) { lastHud = now; hud(r, now); }
+  requestAnimationFrame(frame);
+}
+
+(async function start() {
+  net = await connect();
+  net.onState((st) => { S = st; });
+  net.on("again", () => again());
+  net.onDisconnect(() => { dropped = true; $("net").textContent = "Reconnecting…"; });
+  net.onReconnect(() => { dropped = false; });
+  if (!net.offline && typeof MP !== "undefined") board = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
+  const taken = new Set([...Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.c), ...shared("bots", []).map((b) => b.c)]);
+  myColor = COLORS.find((c) => !taken.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
+  net.me.set({ n: myName, c: myColor, hb: Date.now() });
+  if (ATTRACT) Object.assign(CONFIG, { countdown: 1000, resultsFor: 1500, seats: 7 });
+  me.skill = 1; me.lane = 0.3;
+  camera.position.set(me.m.p.x, me.m.p.y + 5, me.m.p.z - 10);
+  started = performance.now();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

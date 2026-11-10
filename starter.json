@@ -1,0 +1,21 @@
+{
+  "name": "Marble Dash",
+  "genre": "racing",
+  "dim": "3D",
+  "mode": "Party",
+  "players": "2–8",
+  "hook": "Roll your marble to the goal. Don't fall off.",
+  "how": "Everyone rolls a marble down the same sky course at once: steep ramps, jumps over gaps, bumpers, moving platforms and a spinning sweeper. Fall off and you go back to the last checkpoint. First to the goal wins.",
+  "controls": "WASD or arrows to roll, Space to jump, or a stick and a Jump button",
+  "uses": [
+    ["Leaderboard", "The fastest runs to the goal."],
+    ["Host-run rounds", "The host's browser starts each round and posts the results; if it leaves, the next player takes over."],
+    ["Bots", "Bots roll with you, and sometimes fall off, until enough people join."],
+    ["Live sync", "Every marble rolls for everyone at once, and the moving platforms run on one shared clock."]
+  ],
+  "ideas": [
+    "Add a loop the marbles roll around",
+    "Add ice that makes marbles slide",
+    "Give the winner a golden marble next round"
+  ]
+}
