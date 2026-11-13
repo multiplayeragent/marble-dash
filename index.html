@@ -79,6 +79,8 @@
  *     a second, plus `hb` (heartbeat) once a second and `n`/`c` (name, color) once.
  *   - Marbles bump each other: each player pushes its own marble out of the others it
  *     touches, so a bump looks the same from both sides without anyone writing anyone else.
+ *   - Effects need no messages: every client works out from a marble's position and finish
+ *     time when it hits a bumper or reaches the goal (viewEffects), bots included.
  *   - Movers and the sweeper move on a SHARED CLOCK: their position is a function of time,
  *     so nobody streams them. The host writes `clk` (its clock) every 2 seconds and everyone
  *     else keeps the offset.
@@ -541,7 +543,8 @@ function race() {
   return host.last && isHost() && (!r || host.last.v > r.v) ? host.last : r;
 }
 function writeRace(r) { r = { ...r, v: (race()?.v ?? 0) + 1 }; host.last = r; net.setShared("race", JSON.stringify(r)); return r; }
-const newRace = (id) => writeRace({ id, phase: "grid", startAt: Date.now() + CONFIG.countdown, endsAt: 0, results: [] });
+// Race times are on the shared clock, so a device whose own clock is off still gets the right countdown and finish time.
+const newRace = (id) => writeRace({ id, phase: "grid", startAt: clock() + CONFIG.countdown, endsAt: 0, results: [] });
 
 /** Everyone in this round as { id, name, color, s, ft, cp }, leader first: finishers by time, then by distance along the course. */
 function racers() {
@@ -586,7 +589,7 @@ function hostTick(dt, now, t) {
   if (!r) r = newRace(1);
   if (host.raceId !== r.id) { host.raceId = r.id; if (r.phase === "grid") spawnBots(humans); }
   else if (r.phase === "grid" && host.bots.size !== Math.max(0, CONFIG.seats - humans.length)) spawnBots(humans); // someone joined or left before GO
-  const wall = Date.now();
+  const wall = clock();
   if (r.phase === "grid" && wall >= r.startAt) r = writeRace({ ...r, phase: "race" });
   if (r.phase === "race") {
     const all = racers(), done = all.filter((x) => x.ft);
@@ -603,7 +606,7 @@ function hostTick(dt, now, t) {
     const ev = stepMarble(b.m, racing ? botInput(b, t) : { x: -b.m.v.x * 0.2, z: -b.m.v.z * 0.2, jump: false }, dt);
     if (ev === "bump") beepAt(b.m.p, 520, 0.06, "square", 0.05);
     if (b.m.ground && b.m.ground.cp > b.cp) b.cp = b.m.ground.cp;
-    if (racing && b.m.ground && b.m.ground.goal) { b.ft = wall - r.startAt; burst(b.m.p, b.color, 40, 6); }
+    if (racing && b.m.ground && b.m.ground.goal) b.ft = Math.round(wall - r.startAt); // its confetti is drawn by viewEffects(), on every client
     if (b.m.s > b.bestS + 1) { b.bestS = b.m.s; b.stuckAt = now; } else if (!b.stuckAt) b.stuckAt = now;
     if (fallen(b.m) || (racing && now - b.stuckAt > 12000)) { b.m = newMarble(spawnAt(b.cp, b.slot)); b.m.li = course.cps[Math.min(b.cp, course.cps.length - 1)].li; b.stuckAt = now; b.bestS = 0; }
   }
@@ -664,7 +667,7 @@ function myTick(dt, r, t, now) {
     const fx = Math.sin(camYaw), fz = Math.cos(camYaw), iz = (input.up ? 1 : 0) - (input.down ? 1 : 0) - input.sy, ix = (input.right ? 1 : 0) - (input.left ? 1 : 0) + input.sx;
     let x = fx * iz - fz * ix, z = fz * iz + fx * ix; const l = Math.hypot(x, z); if (l > 1) { x /= l; z /= l; }
     inp = { x, z, jump: input.jump };
-  } else if (r.phase === "grid") inp = { x: -me.m.v.x * 0.3, z: -me.m.v.z * 0.3, jump: false }; // hold still on the start pad
+  } else inp = { x: -me.m.v.x * 0.3, z: -me.m.v.z * 0.3, jump: false }; // not racing: hold still on the start pad, and stop at the goal instead of rolling off it
   input.jump = false;
   const ev = stepMarble(me.m, inp, dt);
   if (ev === "jump") beep(520, 0.1, "triangle", 0.08, 760);
@@ -693,7 +696,7 @@ function myTick(dt, r, t, now) {
   }
 }
 function finish(r) {
-  me.ft = Date.now() - r.startAt;
+  me.ft = Math.round(clock() - r.startAt);
   if (!me.best || me.ft < me.best) me.best = me.ft;
   burst(me.m.p, myColor, 80, 8); beep(660, 0.15); setTimeout(() => beep(880, 0.15), 150); setTimeout(() => beep(1320, 0.35), 300);
   const place = racers().findIndex((x) => x.mine) + 1;
@@ -709,7 +712,7 @@ let toastTimer = 0;
 function toast(text, ms = 1500) { if (ATTRACT) return; const m = $("msg"); m.textContent = text; m.classList.add("on"); clearTimeout(toastTimer); toastTimer = setTimeout(() => m.classList.remove("on"), ms); }
 let board = null, boardFor = -1, lastCount = "", started = 0;
 function hud(r, now) {
-  const wall = Date.now();
+  const wall = clock();
   const count = r.phase === "grid" && r.startAt - wall < 3000 ? String(Math.max(1, Math.ceil((r.startAt - wall) / 1000))) : r.phase === "race" && wall - r.startAt < 900 ? "GO!" : "";
   if (count !== lastCount) { lastCount = count; if (count === "GO!") beep(880, 0.4, "square", 0.08); else if (count) beep(440, 0.15, "square", 0.08); }
   $("count").textContent = count;
@@ -749,6 +752,7 @@ const KEYS = { ArrowUp: "up", w: "up", W: "up", ArrowDown: "down", s: "down", S:
 const wakeAudio = () => { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } };
 addEventListener("keydown", (e) => { wakeAudio(); const k = KEYS[e.key]; if (k) { e.preventDefault(); input[k] = true; } if (e.key === " ") { e.preventDefault(); if (!e.repeat) input.jump = true; } });
 addEventListener("keyup", (e) => { const k = KEYS[e.key]; if (k) input[k] = false; });
+addEventListener("blur", () => { input.up = input.down = input.left = input.right = input.jump = false; }); // a key held while the tab loses focus never sends its keyup
 const stick = $("stick"), knob = $("knob");
 let stickId = null;
 function moveStick(e) {
@@ -783,6 +787,12 @@ function follow(v, k, dt, now, exact) {
   if (v.fresh || v.p.distanceTo(tgt) > 12) { v.p.copy(tgt); v.fresh = false; }
   v.p.lerp(tgt, 1 - Math.pow(0.0005, dt)); v.v.copy(v.sv);
 }
+/** What everyone should see another marble (a player's or a bot's) do: light the bumper it hits, throw confetti at the goal. */
+function viewEffects(v, ft) {
+  for (const bp of course.bumpers) if (Math.hypot(v.p.x - bp.c.x, v.p.z - bp.c.z) < bp.r + R + 0.25 && Math.abs(v.p.y - bp.c.y - R) < 1) bp.flash = 1;
+  if (ft && v.ft === 0) burst(v.p, v.color, 40, 6); // v.ft is undefined on the frame we first see it: no confetti for a marble that finished before we looked
+  v.ft = ft || 0;
+}
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
 function frame(now) {
   requestAnimationFrame(frame);
@@ -801,10 +811,10 @@ function frame(now) {
   for (const [id, p] of Object.entries(S.entities.players || {})) {
     if (id === net.sessionId || !live.has(id)) continue;
     const k = parse(p.m, null); if (!k || !r || k.r !== r.id) continue;
-    seen.add(id); const v = viewOf(id, p.c || "#ccc", p.n || "Player"); follow(v, k, dt, now, false); placeMarble(v.g, v.p, v.v.x, v.v.z, dt);
+    seen.add(id); const v = viewOf(id, p.c || "#ccc", p.n || "Player"); follow(v, k, dt, now, false); placeMarble(v.g, v.p, v.v.x, v.v.z, dt); viewEffects(v, k.ft);
   }
   const exact = isHost();
-  for (const b of botList()) { seen.add(b.i); const v = viewOf(b.i, b.c, b.n); follow(v, b, dt, now, exact); placeMarble(v.g, v.p, v.v.x, v.v.z, dt); }
+  for (const b of botList()) { seen.add(b.i); const v = viewOf(b.i, b.c, b.n); follow(v, b, dt, now, exact); placeMarble(v.g, v.p, v.v.x, v.v.z, dt); viewEffects(v, b.ft); }
   for (const [id, v] of views) if (!seen.has(id)) { scene.remove(v.g); views.delete(id); }
   if (!me.g) me.g = makeMarble(myColor, "");
   placeMarble(me.g, me.m.p, me.m.v.x, me.m.v.z, dt);
